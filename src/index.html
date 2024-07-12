@@ -1,0 +1,32 @@
+ <!DOCTYPE html>
+<html>
+<body>
+    <script>
+        const elem = document.getElementById("para");
+        
+        socket = new WebSocket()
+
+        // button press function
+        function send(text) {
+            socket.send(text)
+        }
+
+        // Listen for messages
+        socket.addEventListener("message", (event) => {
+            console.log("Message from server ", event.data);
+        });
+
+        // On websocket conn established
+        socket.addEventListener("open", (event) => {
+            elem.innerText = "websocket connection is open";
+        });
+
+        function websocket() {
+            socket = new WebSocket("wss://localhost:8080/ws");
+        }
+    </script> 
+    <p id="para">Some text here</p>
+    <button onclick="send('hello from the client');">Send message</button>
+    <button onclick="websocket();">Open websocket connection</button>
+</body>
+</html> 
