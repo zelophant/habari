@@ -59,6 +59,24 @@ func acceptIncoming(newConnections chan net.Conn) {
 	}
 }
 
+func dialAddresses(pathToAddresses string, newConnections chan net.Conn) {
+	localAddr, err := net.ResolveTCPAddr("tcp", ":8080")
+	if err != nil {
+		log.Fatal("Couldn't get localhost address: ", err)
+	}
+
+	//  FIXME: read address book from file in the future
+	addressBook := make([]*net.TCPAddr, 0)
+	for _, addr := range addressBook {
+		// Dial address
+		if conn, err := net.DialTCP("tcp", localAddr, addr); err != nil {
+			log.Println("couldn't dial address ", addr, ": ", err)
+		} else {
+			newConnections <- conn
+		}
+	}
+}
+
 func listen(conn net.Conn, messages chan []byte) {
 	buffer := make([]byte, 1024)
 	for {
@@ -79,33 +97,30 @@ func main() {
 	// peer network
 
 	newConnections := make(chan net.Conn)
-	incomingMessages := make(chan []byte)
+	in := make(chan []byte)
+	out := make(chan []byte)
 
 	go acceptIncoming(newConnections)
 
-	localAddr, err := net.ResolveTCPAddr("tcp", ":8080")
-	if err != nil {
-		log.Fatal("Couldn't get localhost address: ", err)
-	}
+	pathToAddressBook := "my/path/"
+	dialAddresses(pathToAddressBook, newConnections)
 
-	//  FIXME: read address book from file in the future
-	addressBook := make([]*net.TCPAddr, 0)
-	for _, addr := range addressBook {
-		// Dial address
-		if conn, err := net.DialTCP("tcp", localAddr, addr); err != nil {
-			log.Println("couldn't dial address ", addr, ": ", err)
-		} else {
-			newConnections <- conn
+	//  NOTE: write go routine for handling new incoming messages
+	// needs to be a value telling us if they are wanting us to serve a file or telling us to update a file???
+	// or does this need to be thought out a bit more?
+	go func() {
+		for msg := range <-in {
+
 		}
-	}
+	}()
 
 	conns := make([]net.Conn, 0)
 	for {
 		select {
 		case conn := <-newConnections:
 			conns = append(conns, conn)
-			go listen(conn, incomingMessages)
-		case msg := <-broadcast:
+			go listen(conn, in)
+		case msg := <-out:
 			for _, conn := range conns {
 				conn.Write(msg)
 			}
