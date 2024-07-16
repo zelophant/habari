@@ -4,7 +4,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"sync"
 
 	"github.com/zelophant/habari/database"
 
@@ -12,7 +11,6 @@ import (
 )
 
 func handleFrontend(w http.ResponseWriter, r *http.Request) {
-
 	var upgrader = websocket.Upgrader{
 		ReadBufferSize:  1024,
 		WriteBufferSize: 1024,
@@ -46,10 +44,30 @@ func handleFrontend(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func handleNetworkConnection(conn net.Conn) {
-	// Should set a deadline with conn.SetReadDeadline()
-	buffer := make([]byte, 100)
-	conn.Read(buffer)
+func acceptIncoming(newConnections chan net.Conn) {
+	port := ":8080"
+	listener, err := net.Listen("tcp", port)
+	if err != nil {
+		log.Fatal("Couldn't listen on port ", port, err)
+	}
+	for {
+		if conn, err := listener.Accept(); err != nil {
+			log.Println("Couldn't accept new incoming connection: ", err)
+		} else {
+			newConnections <- conn
+		}
+	}
+}
+
+func listen(conn net.Conn, messages chan []byte) {
+	buffer := make([]byte, 1024)
+	for {
+		if _, err := conn.Read(buffer); err != nil {
+			log.Println("couldn't read connection: ", err)
+		} else {
+			messages <- buffer
+		}
+	}
 }
 
 func main() {
@@ -59,62 +77,39 @@ func main() {
 	go log.Fatal(http.ListenAndServe(":8080", nil))
 
 	// peer network
-	addr := &net.UDPAddr{
-		IP:   net.IPv4(0, 0, 0, 0),
-		Port: 8000,
-		Zone: "",
+
+	newConnections := make(chan net.Conn)
+	incomingMessages := make(chan []byte)
+
+	go acceptIncoming(newConnections)
+
+	localAddr, err := net.ResolveTCPAddr("tcp", ":8080")
+	if err != nil {
+		log.Fatal("Couldn't get localhost address: ", err)
 	}
-
-	// Incoming calls are made by peers who have my address in their "address book"
-
-	// Currently storing all such connections in an array
-	// This is bad because ideally each connection is handled in its own goroutine
-	// each routine would write the connection's messages to a channel
-	// then all messages would be processed in a separate routine which reads from that channel.
-	incomingCalls := struct {
-		mu    sync.Mutex
-		conns []*net.UDPConn
-	}{
-		mu:    sync.Mutex{},
-		conns: make([]*net.UDPConn, 0),
-	}
-
-	go func() {
-		for {
-			conn, err := net.ListenUDP("udp", addr)
-			if err != nil {
-				return
-			}
-			incomingCalls.mu.Lock()
-			incomingCalls.conns = append(incomingCalls.conns, conn)
-			incomingCalls.mu.Unlock()
-		}
-	}()
-
-	// Outgoing calls made by looking up addresses in a locally stored "address book"
-	outgoingCalls := make([]net.Conn, 0)
 
 	//  FIXME: read address book from file in the future
-	addressBook := make([]*net.UDPAddr, 0)
-
-	for _, val := range addressBook {
-		// Dial to the address with UDP
-		conn, err := net.DialUDP("udp", nil, val)
-		if err != nil {
-			log.Println(err)
+	addressBook := make([]*net.TCPAddr, 0)
+	for _, addr := range addressBook {
+		// Dial address
+		if conn, err := net.DialTCP("tcp", localAddr, addr); err != nil {
+			log.Println("couldn't dial address ", addr, ": ", err)
+		} else {
+			newConnections <- conn
 		}
-		outgoingCalls = append(outgoingCalls, conn)
 	}
 
-	// Stupid bad idea ranging over all connections sequentially
+	conns := make([]net.Conn, 0)
 	for {
-		for i, v := range outgoingCalls {
-			// do something
+		select {
+		case conn := <-newConnections:
+			conns = append(conns, conn)
+			go listen(conn, incomingMessages)
+		case msg := <-broadcast:
+			for _, conn := range conns {
+				conn.Write(msg)
+			}
 		}
-		incomingCalls.mu.Lock()
-		for i, v := range incomingCalls.conns {
-			// do something
-		}
-		incomingCalls.mu.Unlock()
 	}
+
 }
