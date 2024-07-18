@@ -97,8 +97,8 @@ func main() {
 	// peer network
 
 	newConnections := make(chan net.Conn)
-	in := make(chan []byte)
-	out := make(chan []byte)
+	recieved := make(chan []byte)
+	sending := make(chan []byte)
 
 	go acceptIncoming(newConnections)
 
@@ -109,21 +109,22 @@ func main() {
 	// needs to be a value telling us if they are wanting us to serve a file or telling us to update a file???
 	// or does this need to be thought out a bit more?
 	go func() {
-		for msg := range <-in {
+		for msg := range recieved {
 
 		}
 	}()
 
 	conns := make([]net.Conn, 0)
-	for {
-		select {
-		case conn := <-newConnections:
+	go func() {
+		for conn := range newConnections {
 			conns = append(conns, conn)
-			go listen(conn, in)
-		case msg := <-out:
-			for _, conn := range conns {
-				conn.Write(msg)
-			}
+			go listen(conn, recieved)
+		}
+	}()
+
+	for msg := range sending {
+		for _, conn := range conns {
+			conn.Write(msg)
 		}
 	}
 
